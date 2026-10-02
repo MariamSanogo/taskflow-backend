@@ -5,9 +5,28 @@ const express = require("express");
 const cors = require("cors");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
+const { Resend } = require("resend");
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
+// Sans clé Resend, les emails sont simplement désactivés (le serveur démarre quand même)
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+// Envoie un email a la personne assignee, sans jamais faire planter la route
+// si Resend echoue (ex: adresse non autorisee en plan gratuit)
+async function sendTaskAssignedEmail(toEmail, taskTitle, projectName) {
+  if (!resend) return;
+  try {
+    await resend.emails.send({
+      from: "TaskFlow <onboarding@resend.dev>",
+      to: toEmail,
+      subject: `Nouvelle tâche assignée : ${taskTitle}`,
+      html: `<p>Bonjour,</p><p>On vous a assigné la tâche <strong>${taskTitle}</strong> dans le projet <strong>${projectName}</strong>.</p>`,
+    });
+  } catch (err) {
+    console.error("Echec envoi email:", err.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,12 +91,18 @@ app.post("/tasks", requireAuth, async (req, res) => {
         description: description || null,
       },
       include: {
-        assignee: { select: { id: true, name: true, initials: true, color: true } },
+        assignee: { select: { id: true, name: true, initials: true, color: true, email: true } },
+        project: { select: { name: true } },
         subtasks: true,
         comments: true,
       },
     });
-    res.status(201).json(newTask);
+
+    sendTaskAssignedEmail(newTask.assignee.email, newTask.title, newTask.project.name);
+
+    const { project, assignee, ...taskFields } = newTask;
+    const { email, ...assigneeWithoutEmail } = assignee;
+    res.status(201).json({ ...taskFields, assignee: assigneeWithoutEmail });
   } catch (err) {
     res.status(400).json({ error: "Impossible de créer la tâche" });
   }
@@ -95,8 +120,18 @@ app.put("/tasks/:id", requireAuth, async (req, res) => {
         done,
         assigneeId: assigneeId ? Number(assigneeId) : undefined,
       },
+      include: {
+        assignee: { select: { email: true } },
+        project: { select: { name: true } },
+      },
     });
-    res.json(task);
+
+    if (assigneeId) {
+      sendTaskAssignedEmail(task.assignee.email, task.title, task.project.name);
+    }
+
+    const { assignee, project, ...taskFields } = task;
+    res.json(taskFields);
   } catch (err) {
     res.status(404).json({ error: "Tâche introuvable" });
   }
@@ -313,6 +348,11 @@ app.post("/login", async (req, res) => {
   res.json({ token });
 });
 
-app.listen(PORT, () => {
-  console.log(`Serveur démarré sur http://localhost:${PORT}`);
-});
+// Sur Vercel, l'app est exportée et Vercel gère le serveur ; en local on écoute sur PORT.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Serveur démarré sur http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

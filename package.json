@@ -5,8 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "nodemon server.js",
     "build": "prisma generate --config prisma7.config.ts",
     "migrate:deploy": "prisma migrate deploy --config prisma7.config.ts",
+    "vercel-build": "prisma generate --config prisma7.config.ts && prisma migrate deploy --config prisma7.config.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -21,9 +23,11 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "resend": "^6.30.0"
   },
   "devDependencies": {
+    "nodemon": "^3.1.14",
     "prisma": "^7.10.0"
   }
 }
